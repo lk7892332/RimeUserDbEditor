@@ -1,0 +1,83 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:dg="using:Avalonia.Controls"
+        x:Class="RimeUserDbEditor.MainWindow"
+        Title="Rime 使用者詞典編輯器"
+        Width="960" Height="600"
+        MinWidth="780" MinHeight="500"
+        WindowStartupLocation="CenterScreen">
+    <Grid Margin="8" RowDefinitions="Auto,Auto,*,Auto">
+
+        <!-- Row 1: Rime ops next to the dict combo (primary flow);
+                    Wipe-and-Rebuild sits with them since it's also against
+                    the chosen dict. File-only ops are pushed right with a
+                    spacer to visually separate them from the Rime cluster. -->
+        <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,4" Spacing="4">
+            <ComboBox x:Name="DictCombo" Width="240"
+                      SelectionChanged="DictCombo_SelectionChanged"/>
+            <Button x:Name="LoadButton"     Content="從 Rime 載入"     Click="LoadButton_Click"/>
+            <Button x:Name="SaveButton"     Content="儲存至 Rime"      Click="SaveButton_Click"/>
+            <Button x:Name="RebuildButton"  Content="清空並重建資料庫" Click="RebuildButton_Click"/>
+            <Border Width="16"/>
+            <Button x:Name="LoadFileButton" Content="開啟檔案..."      Click="LoadFileButton_Click"/>
+            <Button x:Name="SaveAsButton"   Content="另存新檔..."      Click="SaveAsButton_Click"/>
+        </StackPanel>
+
+        <!-- Row 2: search 與 filters 各佔 50% -->
+        <Grid Grid.Row="1" Margin="0,0,0,4" ColumnDefinitions="*,*">
+            <TextBox Grid.Column="0" x:Name="SearchBox"
+                     Margin="0,0,4,0"
+                     PlaceholderText="搜尋詞語或編碼..."
+                     TextChanged="SearchBox_TextChanged"/>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="12" Margin="4,0,0,0">
+                <CheckBox x:Name="ShowDeletedBox" Content="顯示已刪除"
+                          VerticalAlignment="Center"
+                          IsCheckedChanged="ShowDeleted_Changed"/>
+                <CheckBox x:Name="NotInEssayBox" Content="不在 essay.txt"
+                          VerticalAlignment="Center"
+                          ToolTip.Tip="只顯示詞語不在 shared_data_dir/essay.txt 的條目（過濾掉標準詞庫已知的詞）。"
+                          IsCheckedChanged="NotInEssay_Changed"/>
+                <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center"
+                            ToolTip.Tip="只顯示詞語字數大於等於指定值的條目。">
+                    <CheckBox x:Name="MinLengthBox" Content="長度 ≥"
+                              VerticalAlignment="Center"
+                              IsCheckedChanged="MinLength_Changed"/>
+                    <NumericUpDown x:Name="MinLengthValue"
+                              Value="5" Minimum="1" Maximum="999" Increment="1"
+                              FormatString="0" Width="120"
+                              VerticalAlignment="Center"
+                              ValueChanged="MinLengthValue_Changed"/>
+                </StackPanel>
+            </StackPanel>
+        </Grid>
+
+        <!-- Row 3: data grid -->
+        <dg:DataGrid Grid.Row="2" x:Name="List"
+                     x:CompileBindings="False"
+                     SelectionMode="Extended"
+                     IsReadOnly="True"
+                     CanUserSortColumns="True"
+                     CanUserResizeColumns="True"
+                     SelectionChanged="List_SelectionChanged"
+                     DoubleTapped="List_DoubleTapped">
+            <dg:DataGrid.Columns>
+                <dg:DataGridTextColumn Header="詞語"        Width="*" Binding="{Binding Text}"    SortMemberPath="Text"/>
+                <dg:DataGridTextColumn Header="編碼"        Width="*" Binding="{Binding Code}"    SortMemberPath="Code"/>
+                <dg:DataGridTextColumn Header="Commits (c)" Width="*" Binding="{Binding Commits}" SortMemberPath="Commits"/>
+                <dg:DataGridTextColumn Header="Dee (d)"     Width="*" Binding="{Binding Dee}"     SortMemberPath="DeeValue"/>
+                <dg:DataGridTextColumn Header="Tick (t)"    Width="*" Binding="{Binding Tick}"    SortMemberPath="Tick"/>
+            </dg:DataGrid.Columns>
+        </dg:DataGrid>
+
+        <!-- Row 4: CRUD buttons + status bar (footer, status 靠右) -->
+        <Grid Grid.Row="3" Margin="0,4,0,0" ColumnDefinitions="Auto,Auto,Auto,*">
+            <Button   Grid.Column="0" x:Name="AddButton"    Content="新增"             Click="AddButton_Click"/>
+            <Button   Grid.Column="1" x:Name="EditButton"   Content="編輯" Margin="4,0,0,0" Click="EditButton_Click"/>
+            <Button   Grid.Column="2" x:Name="DeleteButton" Content="刪除" Margin="4,0,0,0" Click="DeleteButton_Click"/>
+            <TextBlock Grid.Column="3" x:Name="StatusText"
+                       Margin="12,0,0,0" VerticalAlignment="Center"
+                       TextAlignment="Right"
+                       TextTrimming="CharacterEllipsis"/>
+        </Grid>
+    </Grid>
+</Window>

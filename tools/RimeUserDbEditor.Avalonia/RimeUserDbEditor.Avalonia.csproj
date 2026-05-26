@@ -1,0 +1,60 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <!-- Avalonia is cross-platform, so the TFM is plain net10.0 (no -windows
+         suffix). The Windows-specific bits (Registry, IPC, SetDllDirectory,
+         WeaselServer process control) are guarded by OperatingSystem.IsWindows()
+         at call sites. -->
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>RimeUserDbEditor</RootNamespace>
+    <AssemblyName>RimeUserDbEditor</AssemblyName>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <PublishTrimmed>false</PublishTrimmed>
+    <PublishSingleFile>false</PublishSingleFile>
+    <PublishAot>false</PublishAot>
+    <SelfContained>false</SelfContained>
+    <!-- LibraryImport source-generator output uses unsafe spans. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- Avalonia source generator builds .axaml -> compiled XAML. -->
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Using Include="System.IO"/>
+  </ItemGroup>
+
+  <!-- dump-rime-structs.cs is a standalone .NET file-based program (its own
+       top-level entry point, run via `dotnet run dump-rime-structs.cs`).
+       Excluding it from the WPF/Avalonia compilation prevents its top-level
+       statements from hijacking Program.Main as the assembly entry point
+       (CS7022). Mirrors the WPF tool's csproj. -->
+  <ItemGroup>
+    <Compile Remove="dump-rime-structs.cs" />
+    <None Include="dump-rime-structs.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia"                   Version="12.0.3"/>
+    <PackageReference Include="Avalonia.Desktop"           Version="12.0.3"/>
+    <PackageReference Include="Avalonia.Themes.Fluent"     Version="12.0.3"/>
+    <PackageReference Include="Avalonia.Fonts.Inter"       Version="12.0.3"/>
+    <PackageReference Include="Avalonia.Controls.DataGrid" Version="12.0.0"/>
+    <!-- In-app inspector (F12) — Debug-only per the Avalonia template. -->
+    <PackageReference Include="AvaloniaUI.DiagnosticsSupport" Version="2.2.1">
+      <IncludeAssets Condition="'$(Configuration)' != 'Debug'">None</IncludeAssets>
+      <PrivateAssets Condition="'$(Configuration)' != 'Debug'">All</PrivateAssets>
+    </PackageReference>
+    <!-- MessageBox replacement for the WPF MessageBox calls. -->
+    <PackageReference Include="MessageBox.Avalonia"        Version="12.0.0"/>
+    <!-- Pin the Linux DBus transitive to a non-vulnerable version. Avalonia
+         12.0.3 transitively resolves to 0.92.0 today, but earlier 12.x took
+         0.90.3 which is on GHSA-xrw6-gwf8-vvr9 — this prevents an Avalonia
+         downgrade (or a fresh restore against a hypothetical floating
+         resolution) from silently bringing the vulnerable version back. -->
+    <PackageReference Include="Tmds.DBus.Protocol"         Version="0.92.0"/>
+  </ItemGroup>
+
+</Project>
