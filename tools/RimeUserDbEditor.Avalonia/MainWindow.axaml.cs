@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.Globalization;
 using System.Text;
 using Avalonia.Collections;
@@ -6,6 +7,7 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
+using Avalonia.Threading;
 
 namespace RimeUserDbEditor;
 
@@ -24,6 +26,7 @@ public sealed partial class MainWindow : Window
     // 留在 _view 上,_rows 重建時不會掉。
     private readonly ObservableCollection<RowVm> _rows = new();
     private DataGridCollectionView? _view;
+    private FilterCriteria _filter = FilterCriteria.None;
     private bool _dirty;
     private ServerPauseMode _pauseMode = ServerPauseMode.None;
     private bool _bootstrapped;
@@ -32,10 +35,16 @@ public sealed partial class MainWindow : Window
     // 安全得多。
     private bool _suppressDictChange;
 
-    private sealed class RowVm
+    private sealed class RowVm : INotifyPropertyChanged
     {
-        public int ModelIndex { get; init; }
-        public UserDbEntry Entry { get; init; } = null!;
+        public RowVm(int modelIndex, UserDbEntry entry)
+        {
+            ModelIndex = modelIndex;
+            Entry = entry;
+        }
+
+        public int ModelIndex { get; }
+        public UserDbEntry Entry { get; private set; }
         public string Text    => Entry.Text;
         public string Code    => Entry.Code;
         public int    Commits => Entry.Commits;
@@ -43,6 +52,42 @@ public sealed partial class MainWindow : Window
         public string Dee      => Entry.Dee.ToString("G", CultureInfo.InvariantCulture);
         public double DeeValue => Entry.Dee;
         public ulong  Tick     => Entry.Tick;
+
+        public event PropertyChangedEventHandler? PropertyChanged;
+
+        // 編輯後就地換 Entry 並通知所有欄位刷新,省掉 RefreshList 整表重建。
+        // ModelIndex 不變,_rows 的 index↔model 不變式照舊成立。
+        private static readonly string[] Cols =
+            [nameof(Text), nameof(Code), nameof(Commits),
+             nameof(Dee), nameof(DeeValue), nameof(Tick)];
+        public void UpdateEntry(UserDbEntry entry)
+        {
+            Entry = entry;
+            foreach (var name in Cols)
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+        }
+    }
+
+    // RefreshView 前先把 filter 控制項的狀態 snapshot 成這個,predicate 對每列
+    // 讀它而不是反覆戳控制項 —— 10k+ 列時省掉每列數次 IsChecked / Value / Text
+    // 的存取,也讓判斷邏輯脫離 View 變得可測。
+    private sealed record FilterCriteria(
+        string Search, bool ShowDeleted, bool NotInEssay,
+        HashSet<string>? EssayPhrases, int MinLength)
+    {
+        // view 第一次 filter 之前的佔位值;ShowDeleted=true 故不會誤藏任何列。
+        public static readonly FilterCriteria None =
+            new(string.Empty, true, false, null, 0);
+
+        public bool Passes(UserDbEntry e)
+        {
+            if (!ShowDeleted && e.Commits < 0) return false;
+            if (NotInEssay && EssayPhrases != null && EssayPhrases.Contains(e.Text)) return false;
+            if (MinLength > 0 && e.Text.Length < MinLength) return false;
+            if (Search.Length == 0) return true;
+            return e.Text.Contains(Search, StringComparison.OrdinalIgnoreCase)
+                || e.Code.Contains(Search, StringComparison.OrdinalIgnoreCase);
+        }
     }
 
     private enum ServerPauseMode { None, IpcMaintenance, Quit }
@@ -464,8 +509,11 @@ public sealed partial class MainWindow : Window
         if (ok)
         {
             _model.Entries[idx] = dlg.Entry;
+            // 就地換 Entry + 通知,而非 RefreshList 整表重建。改完可能命中/離開
+            // filter (例如 c 改成負值),所以仍要 RefreshView 重跑 predicate。
+            sel.UpdateEntry(dlg.Entry);
             _dirty = true;
-            RefreshList();
+            RefreshView();
             UpdateButtons();
         }
         // 不管 OK 或 Cancel 都還原到剛編輯的那筆;ModelIndex 不變所以能直接找。
@@ -503,9 +551,14 @@ public sealed partial class MainWindow : Window
             //   v.commits = std::min(-1, -v.commits);
             var entry = _model.Entries[i];
             entry.Commits = Math.Min(-1, -entry.Commits);
+            // 刪除只是把 c 翻負,不是結構性移除 —— 就地通知對應列刷新 (顯示已刪除
+            // 時 Commits 欄要更新),而非 RefreshList 整表重建。重建的 Clear+Add
+            // reset 會讓 DataGrid 在後續 layout 把列表捲到最下面,defer 也壓不住;
+            // 走 RefreshView 這條輕路徑就沒這問題。ModelIndex 不變式成立故直接索引。
+            _rows[i].UpdateEntry(entry);
         }
         _dirty = true;
-        RefreshList();
+        RefreshView();
         UpdateButtons();
         SelectAtViewIndex(focusViewIndex);
     }
@@ -516,10 +569,17 @@ public sealed partial class MainWindow : Window
         if (row != null)
         {
             List.SelectedItem = row;
-            List.ScrollIntoView(row, null);
+            ScrollIntoViewDeferred(row);
         }
         List.Focus();
     }
+
+    /// <summary>把 <paramref name="row"/> 捲進可見區,但 post 到 layout pass 之後。
+    /// Refresh() / _rows 重建會觸發 collection reset,DataGrid 隨後的 layout 會
+    /// 自行把列表捲到最下面 —— 同步呼叫 ScrollIntoView 會被那趟覆寫,所以 defer。</summary>
+    private void ScrollIntoViewDeferred(RowVm row)
+        => Dispatcher.UIThread.Post(() => List.ScrollIntoView(row, null),
+                                    DispatcherPriority.Background);
 
     /// <summary>選取 ModelIndex 對應的列。RefreshList 後 <c>_rows[i].ModelIndex == i</c>
     /// 的不變式成立,所以直接索引。</summary>
@@ -688,40 +748,44 @@ public sealed partial class MainWindow : Window
     {
         if (_view == null)
         {
+            // predicate 只讀 snapshot,先補一次 (control 預設值);之後每次
+            // RefreshView 會重新 snapshot。
+            _filter = SnapshotFilter();
             _view = new DataGridCollectionView(_rows)
             {
-                Filter = obj => obj is RowVm row && PassesFilter(row),
+                Filter = obj => obj is RowVm row && _filter.Passes(row.Entry),
             };
             List.ItemsSource = _view;
         }
 
         _rows.Clear();
         for (int i = 0; i < _model.Entries.Count; i++)
-            _rows.Add(new RowVm { ModelIndex = i, Entry = _model.Entries[i] });
+            _rows.Add(new RowVm(i, _model.Entries[i]));
         UpdateStatus();
     }
 
-    /// <summary>重跑 filter predicate;不會走 model。</summary>
+    /// <summary>重新 snapshot filter 狀態並重跑 predicate;不會走 model。</summary>
     private void RefreshView()
     {
+        _filter = SnapshotFilter();
+        // Refresh() 後 DataGrid 會把列表捲到最下面;選取列若仍通過 filter,把它
+        // 捲回可見。重選路徑 (編輯/刪除) 另有 SelectRow 處理,這裡專管「只改
+        // filter、不重選」的情形 (搜尋打字、切 checkbox)。
+        var selected = List.SelectedItem as RowVm;
         _view?.Refresh();
         UpdateStatus();
+        if (selected != null && _filter.Passes(selected.Entry))
+            ScrollIntoViewDeferred(selected);
     }
 
-    private bool PassesFilter(RowVm row)
-    {
-        if (ShowDeletedBox.IsChecked != true && row.Entry.Commits < 0) return false;
-        if (NotInEssayBox.IsChecked == true && _essayPhrases != null
-            && _essayPhrases.Contains(row.Entry.Text))
-            return false;
-        if (MinLengthBox.IsChecked == true
-            && row.Entry.Text.Length < (int)(MinLengthValue.Value ?? 0))
-            return false;
-        string filter = SearchBox.Text ?? string.Empty;
-        if (filter.Length == 0) return true;
-        return row.Entry.Text.Contains(filter, StringComparison.OrdinalIgnoreCase)
-            || row.Entry.Code.Contains(filter, StringComparison.OrdinalIgnoreCase);
-    }
+    /// <summary>把當下 filter 控制項的狀態收成一個 <see cref="FilterCriteria"/>。
+    /// MinLength 未勾選時收成 0 (= 不過濾);NumericUpDown 的 Minimum=1 保證勾選時 ≥1。</summary>
+    private FilterCriteria SnapshotFilter() => new(
+        SearchBox.Text ?? string.Empty,
+        ShowDeletedBox.IsChecked == true,
+        NotInEssayBox.IsChecked == true,
+        _essayPhrases,
+        MinLengthBox.IsChecked == true ? (int)(MinLengthValue.Value ?? 0) : 0);
 
     private void UpdateStatus()
     {
