@@ -665,7 +665,12 @@ public sealed partial class MainWindow : Window
 
     private void MinLength_Changed(object? sender, RoutedEventArgs e) => RefreshView();
 
-    private void MinLengthValue_Changed(object? sender, NumericUpDownValueChangedEventArgs e) => RefreshView();
+    private void MinLengthValue_Changed(object? sender, NumericUpDownValueChangedEventArgs e)
+    {
+        // checkbox 沒勾時,SnapshotFilter 會把 MinLength 收成 0 (不過濾),改數字
+        // 不影響結果 —— 跳過刷新,省一次整個 view 的 re-filter。
+        if (MinLengthBox.IsChecked == true) RefreshView();
+    }
 
     /// <summary>Lazy-load essay.txt 後刷新 view;載入失敗就把 checkbox 退回去
     /// (退回會重入這個 handler,但 IsChecked == false 不會再嘗試載入,只多跑一次
