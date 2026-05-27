@@ -24,11 +24,13 @@ public sealed class UserDbEntry
     public ulong Tick { get; set; }
 
     public string PackValue()
-        // "G6" = 6 位有效數字,鏡像 librime `UserDbValue::Pack()` 的
-        // `std::ostringstream << dee` 預設精度 (user_db.cc:21-25)。讓 editor
-        // round-trip 後的 disk 字串跟 librime 自己寫的 byte-for-byte 一致;
-        // ranking 行為不受影響 (librime 本來就只保留 6 位精度)。
-        => $"c={Commits} d={Dee.ToString("G6", CultureInfo.InvariantCulture)} t={Tick}";
+        // "g6" = 6 位有效數字,鏡像 librime `UserDbValue::Pack()` 的
+        // `std::ostringstream << dee` 預設精度 (user_db.cc:21-25)。用小寫 g 是
+        // 為了科學記數法的指數字母 —— C# 大寫 "G6" 會輸出大寫 E (9.90387E-05),
+        // 而 C++ ostream 是小寫 e (9.90387e-05);小寫 "g6" 才能跟 librime 自己
+        // 寫的 byte-for-byte 一致。ranking 行為不受影響 (librime 本來就只保留
+        // 6 位精度,std::stod 大小寫 e 都吃)。
+        => $"c={Commits} d={Dee.ToString("g6", CultureInfo.InvariantCulture)} t={Tick}";
 
     public void UnpackValue(string value)
     {
