@@ -283,7 +283,10 @@ public sealed partial class MainWindow : Window
         {
             string tmp = SnapshotTmpPath(_model.SourceDict);
             _model.SaveToFile(tmp);
-            if (!Rime.RestoreUserDictFromFile(tmp))
+            bool restored = Rime.RestoreUserDictFromFile(tmp);
+            // restore 已讀完 tmp,不論成敗都刪掉,別在 temp 留下含使用者資料的殘檔。
+            TryDeleteFile(tmp);
+            if (!restored)
             {
                 await this.ShowError("Rime restore 失敗。");
                 return;
@@ -402,6 +405,8 @@ public sealed partial class MainWindow : Window
             {
                 try { Directory.Delete(bakFolder, true); } catch { /* ignore */ }
             }
+            // 成功才刪 tmp 快照;失敗路徑的 rollback 會把它留著當復原依據。
+            TryDeleteFile(tmp);
 
             _dirty = false;
             await this.ShowInfo("資料庫已被徹底清除並重建完成！", "完成");
@@ -843,6 +848,12 @@ public sealed partial class MainWindow : Window
 
     private static string SnapshotTmpPath(string dictName)
         => Path.Combine(Path.GetTempPath(), RimePaths.SnapshotFileName(dictName));
+
+    // 暫存快照含使用者詞庫內容,用完盡力刪掉;刪不掉 (例如被防毒掃描鎖住) 無妨。
+    private static void TryDeleteFile(string path)
+    {
+        try { File.Delete(path); } catch { /* ignore */ }
+    }
 
     // -- 首次啟動的路徑挑選 / config 迴圈 -------------------------------------
 
