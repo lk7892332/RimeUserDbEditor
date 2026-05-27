@@ -404,10 +404,9 @@ public sealed partial class MainWindow : Window
             }
 
             _dirty = false;
-            RefreshList();
-            UpdateButtons();
             await this.ShowInfo("資料庫已被徹底清除並重建完成！", "完成");
-            // 重新讀回 —— librime 可能把 tick / d 規一化過了。
+            // 重新讀回 —— librime 可能把 tick / d 規一化過了。LoadFromRimeAsync 內部
+            // 已 RefreshList + UpdateButtons,所以這裡不先做,省一次整表重建。
             await LoadFromRimeAsync(_model.SourceDict);
         }
         catch (Exception ex)
@@ -488,8 +487,18 @@ public sealed partial class MainWindow : Window
         if (ok)
         {
             _model.Entries.Add(dlg.Entry);
+            // 只 append 一筆 —— 加一個 RowVm 即可,不必 RefreshList 整表重建。
+            // 新項 ModelIndex == 舊 _rows.Count 故不變式維持;DataGridCollectionView
+            // 會自動對新項跑 filter。_view 還沒建 (尚未載入任何詞典) 則退回 RefreshList
+            // 走首次建立。
+            if (_view == null)
+                RefreshList();
+            else
+            {
+                _rows.Add(new RowVm(_rows.Count, dlg.Entry));
+                UpdateStatus();
+            }
             _dirty = true;
-            RefreshList();
             UpdateButtons();
             // 新增完直接落在新詞條上,方便連續編輯。
             SelectModelIndex(_model.Entries.Count - 1);
@@ -513,10 +522,18 @@ public sealed partial class MainWindow : Window
             // filter (例如 c 改成負值),所以仍要 RefreshView 重跑 predicate。
             sel.UpdateEntry(dlg.Entry);
             _dirty = true;
+            // 先記住它在 view 裡的位置:RefreshView 後若這筆離開了 filter,把焦點
+            // 順移到原位置遞補上來的那列 —— 跟刪除一致,避免選到隱藏列。
+            int viewIndex = _view?.IndexOf(sel) ?? -1;
             RefreshView();
             UpdateButtons();
+            if (_filter.Passes(sel.Entry))
+                SelectModelIndex(idx);
+            else
+                SelectAtViewIndex(viewIndex);
+            return;
         }
-        // 不管 OK 或 Cancel 都還原到剛編輯的那筆;ModelIndex 不變所以能直接找。
+        // 取消:那筆沒動,還原選取到它。ModelIndex 不變所以能直接找。
         SelectModelIndex(idx);
     }
 
